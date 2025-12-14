@@ -378,6 +378,8 @@ def main():
         
         if 'manual_items' not in st.session_state:
             st.session_state.manual_items = []
+        if 'manual_sheets' not in st.session_state:
+            st.session_state.manual_sheets = None
         
         with st.form("add_item_form"):
             col1, col2 = st.columns(2)
@@ -399,6 +401,7 @@ def main():
                         'qty': qty
                     })
                     st.success(f"Added {code} ({parsed['width']}×{parsed['height']}mm) × {qty}")
+                    st.rerun()
                 else:
                     st.error("Invalid code format. Use KP[width][height][material]")
         
@@ -411,9 +414,10 @@ def main():
             with col1:
                 if st.button("Clear All", use_container_width=True):
                     st.session_state.manual_items = []
+                    st.session_state.manual_sheets = None
                     st.rerun()
             with col2:
-                if st.button("🚀 Generate Cut List", type="primary", use_container_width=True):
+                if st.button("🚀 Generate Cut List", type="primary", use_container_width=True, key="manual_generate"):
                     nester = KickplateNester(stock_width, stock_height, kerf_width, grain_direction)
                     pieces = [Piece(
                         code=item['code'],
@@ -425,14 +429,70 @@ def main():
                     ) for item in st.session_state.manual_items]
                     
                     with st.spinner("Optimizing layout..."):
-                        sheets = nester.nest_pieces(pieces)
+                        st.session_state.manual_sheets = nester.nest_pieces(pieces)
+                    st.rerun()
+        
+        # Display results
+        if st.session_state.manual_sheets:
+            sheets = st.session_state.manual_sheets
+            st.success(f"✅ Generated cut list with {len(sheets)} sheet(s)")
+            
+            # Summary metrics
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("Sheets Required", len(sheets))
+            with col2:
+                total_pieces = sum(len(s.placements) for s in sheets)
+                st.metric("Total Pieces", total_pieces)
+            with col3:
+                avg_efficiency = sum(100 - (s.waste_area / (stock_width * stock_height) * 100) for s in sheets) / len(sheets)
+                st.metric("Avg Efficiency", f"{avg_efficiency:.1f}%")
+            
+            for sheet in sheets:
+                with st.expander(f"📋 Sheet {sheet.id + 1} - {len(sheet.placements)} pieces", expanded=True):
+                    fig = create_sheet_visualization(sheet, stock_width, stock_height, grain_direction)
+                    st.plotly_chart(fig, use_container_width=True)
                     
-                    st.success(f"✅ Generated cut list with {len(sheets)} sheet(s)")
-                    
-                    for sheet in sheets:
-                        with st.expander(f"📋 Sheet {sheet.id + 1}", expanded=True):
-                            fig = create_sheet_visualization(sheet, stock_width, stock_height, grain_direction)
-                            st.plotly_chart(fig, use_container_width=True)
+                    # Cutting instructions
+                    st.subheader("Cutting Instructions")
+                    cut_data = []
+                    for i, p in enumerate(sheet.placements):
+                        cut_data.append({
+                            'Piece #': i + 1,
+                            'Part Code': p.code,
+                            'Description': p.description,
+                            'X (mm)': p.x,
+                            'Y (mm)': p.y,
+                            'Width (mm)': p.width,
+                            'Height (mm)': p.height,
+                            'Rotated': '↻ Yes' if p.rotated else 'No'
+                        })
+                    st.dataframe(pd.DataFrame(cut_data), use_container_width=True)
+            
+            # Download button
+            cut_list_data = []
+            for sheet in sheets:
+                for i, p in enumerate(sheet.placements):
+                    cut_list_data.append({
+                        'Sheet': sheet.id + 1,
+                        'Piece #': i + 1,
+                        'Part Code': p.code,
+                        'Description': p.description,
+                        'X Position': p.x,
+                        'Y Position': p.y,
+                        'Width': p.width,
+                        'Height': p.height,
+                        'Rotated': 'Yes' if p.rotated else 'No'
+                    })
+            
+            csv = pd.DataFrame(cut_list_data).to_csv(index=False)
+            st.download_button(
+                label="📥 Download Cut List CSV",
+                data=csv,
+                file_name="manual_cut_list.csv",
+                mime="text/csv",
+                use_container_width=True
+            )
 
 if __name__ == "__main__":
     main()
