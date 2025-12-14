@@ -5,6 +5,13 @@ from typing import List, Dict, Tuple, Optional
 import re
 from dataclasses import dataclass
 import io
+from reportlab.lib import colors
+from reportlab.lib.pagesizes import A4, landscape
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, PageBreak, Image
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.units import mm
+from reportlab.lib.enums import TA_CENTER, TA_LEFT
+from datetime import datetime
 
 @dataclass
 class Piece:
@@ -199,9 +206,9 @@ def create_sheet_visualization(sheet: Sheet, stock_width: int, stock_height: int
                      line=dict(color="lightgray", width=1, dash="dot"))
     
     # Add pieces
-    colors = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899']
+    colors_list = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899']
     for i, p in enumerate(sheet.placements):
-        color = colors[i % len(colors)]
+        color = colors_list[i % len(colors_list)]
         
         # Add rectangle
         fig.add_shape(
@@ -234,6 +241,128 @@ def create_sheet_visualization(sheet: Sheet, stock_width: int, stock_height: int
     
     return fig
 
+def generate_pdf_cutlist(sheets: List[Sheet], stock_width: int, stock_height: int, 
+                        grain_direction: str, filename: str = "cut_list.pdf") -> bytes:
+    """Generate a PDF cut list with diagrams and tables"""
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=landscape(A4), 
+                           rightMargin=20, leftMargin=20,
+                           topMargin=30, bottomMargin=20)
+    
+    elements = []
+    styles = getSampleStyleSheet()
+    
+    # Title style
+    title_style = ParagraphStyle(
+        'CustomTitle',
+        parent=styles['Heading1'],
+        fontSize=24,
+        textColor=colors.HexColor('#1e40af'),
+        spaceAfter=30,
+        alignment=TA_CENTER
+    )
+    
+    # Add title
+    title = Paragraph("Kickplate Cutting List", title_style)
+    elements.append(title)
+    
+    # Add generation info
+    info_style = ParagraphStyle(
+        'Info',
+        parent=styles['Normal'],
+        fontSize=10,
+        alignment=TA_CENTER,
+        spaceAfter=20
+    )
+    
+    info_text = f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M')}<br/>"
+    info_text += f"Stock Size: {stock_width}mm × {stock_height}mm<br/>"
+    info_text += f"Grain Direction: {grain_direction.title()}<br/>"
+    info_text += f"Total Sheets: {len(sheets)}"
+    
+    elements.append(Paragraph(info_text, info_style))
+    elements.append(Spacer(1, 20))
+    
+    # Summary table
+    summary_data = [['Sheet', 'Pieces', 'Efficiency', 'Waste Area']]
+    for sheet in sheets:
+        efficiency = 100 - (sheet.waste_area / (stock_width * stock_height) * 100)
+        summary_data.append([
+            f"Sheet {sheet.id + 1}",
+            str(len(sheet.placements)),
+            f"{efficiency:.1f}%",
+            f"{sheet.waste_area:.0f} mm²"
+        ])
+    
+    summary_table = Table(summary_data, colWidths=[60*mm, 40*mm, 40*mm, 50*mm])
+    summary_table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#3b82f6')),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, 0), 12),
+        ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+        ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
+        ('GRID', (0, 0), (-1, -1), 1, colors.black),
+        ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
+        ('FONTSIZE', (0, 1), (-1, -1), 10),
+    ]))
+    
+    elements.append(summary_table)
+    elements.append(PageBreak())
+    
+    # Add each sheet
+    for sheet in sheets:
+        # Sheet header
+        sheet_title = Paragraph(f"<b>Sheet {sheet.id + 1}</b> - {len(sheet.placements)} pieces", 
+                               styles['Heading2'])
+        elements.append(sheet_title)
+        elements.append(Spacer(1, 10))
+        
+        # Cutting instructions table
+        table_data = [['#', 'Part Code', 'Description', 'X (mm)', 'Y (mm)', 'Width', 'Height', 'Rotated']]
+        
+        for i, p in enumerate(sheet.placements):
+            table_data.append([
+                str(i + 1),
+                p.code,
+                p.description[:30],  # Truncate long descriptions
+                str(p.x),
+                str(p.y),
+                str(p.width),
+                str(p.height),
+                '↻' if p.rotated else '-'
+            ])
+        
+        col_widths = [15*mm, 30*mm, 50*mm, 20*mm, 20*mm, 20*mm, 20*mm, 20*mm]
+        detail_table = Table(table_data, colWidths=col_widths)
+        detail_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#10b981')),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, 0), 10),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 10),
+            ('BACKGROUND', (0, 1), (-1, -1), colors.lightgrey),
+            ('GRID', (0, 0), (-1, -1), 1, colors.black),
+            ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
+            ('FONTSIZE', (0, 1), (-1, -1), 8),
+            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.lightgrey]),
+        ]))
+        
+        elements.append(detail_table)
+        
+        # Add page break between sheets (except last one)
+        if sheet.id < len(sheets) - 1:
+            elements.append(PageBreak())
+        else:
+            elements.append(Spacer(1, 20))
+    
+    # Build PDF
+    doc.build(elements)
+    buffer.seek(0)
+    return buffer.getvalue()
+
 def main():
     st.set_page_config(page_title="Kickplate Nesting Optimizer", layout="wide")
     
@@ -244,8 +373,8 @@ def main():
     with st.sidebar:
         st.header("⚙️ Configuration")
         
-        stock_width = st.number_input("Stock Width (mm)", value=2440, min_value=100, step=10)
-        stock_height = st.number_input("Stock Height (mm)", value=1220, min_value=100, step=10)
+        stock_width = st.number_input("Stock Width (mm)", value=2400, min_value=100, step=10)
+        stock_height = st.number_input("Stock Height (mm)", value=1200, min_value=100, step=10)
         kerf_width = st.number_input("Kerf Width (mm)", value=3, min_value=0, step=1)
         grain_direction = st.selectbox(
             "Grain Direction",
@@ -362,13 +491,25 @@ def main():
                             })
                     
                     csv = pd.DataFrame(cut_list_data).to_csv(index=False)
-                    st.download_button(
-                        label="📥 Download Cut List CSV",
-                        data=csv,
-                        file_name="cut_list.csv",
-                        mime="text/csv",
-                        use_container_width=True
-                    )
+                    
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        st.download_button(
+                            label="📥 Download CSV",
+                            data=csv,
+                            file_name="cut_list.csv",
+                            mime="text/csv",
+                            use_container_width=True
+                        )
+                    with col2:
+                        pdf_data = generate_pdf_cutlist(sheets, stock_width, stock_height, grain_direction)
+                        st.download_button(
+                            label="📄 Download PDF",
+                            data=pdf_data,
+                            file_name="cut_list.pdf",
+                            mime="application/pdf",
+                            use_container_width=True
+                        )
             else:
                 st.warning("No kickplate items (starting with 'KP') found in the CSV")
     
@@ -504,13 +645,25 @@ def main():
                     })
             
             csv = pd.DataFrame(cut_list_data).to_csv(index=False)
-            st.download_button(
-                label="📥 Download Cut List CSV",
-                data=csv,
-                file_name="manual_cut_list.csv",
-                mime="text/csv",
-                use_container_width=True
-            )
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                st.download_button(
+                    label="📥 Download CSV",
+                    data=csv,
+                    file_name="manual_cut_list.csv",
+                    mime="text/csv",
+                    use_container_width=True
+                )
+            with col2:
+                pdf_data = generate_pdf_cutlist(sheets, stock_width, stock_height, grain_direction)
+                st.download_button(
+                    label="📄 Download PDF",
+                    data=pdf_data,
+                    file_name="manual_cut_list.pdf",
+                    mime="application/pdf",
+                    use_container_width=True
+                )
 
 if __name__ == "__main__":
     main()
