@@ -382,33 +382,51 @@ def main():
             st.session_state.manual_sheets = None
         
         with st.form("add_item_form"):
-            col1, col2 = st.columns(2)
+            col1, col2, col3 = st.columns(3)
             with col1:
-                code = st.text_input("Part Code (e.g., KP300300SSS)").upper()
+                width = st.number_input("Width (mm)", min_value=1, value=300, step=10)
             with col2:
+                height = st.number_input("Height (mm)", min_value=1, value=300, step=10)
+            with col3:
                 qty = st.number_input("Quantity", min_value=1, value=1)
             
-            submitted = st.form_submit_button("Add Item")
-            if submitted and code:
-                nester = KickplateNester(stock_width, stock_height, kerf_width, grain_direction)
-                parsed = nester.parse_kickplate_code(code)
-                if parsed:
-                    st.session_state.manual_items.append({
-                        'code': code,
-                        'width': parsed['width'],
-                        'height': parsed['height'],
-                        'material': parsed['material'],
-                        'qty': qty
-                    })
-                    st.success(f"Added {code} ({parsed['width']}×{parsed['height']}mm) × {qty}")
-                    st.rerun()
-                else:
-                    st.error("Invalid code format. Use KP[width][height][material]")
+            col4, col5 = st.columns(2)
+            with col4:
+                material = st.text_input("Material Code", value="SSS", help="Default: SSS (Stainless Steel)").upper()
+            with col5:
+                description = st.text_input("Description (optional)", value="", placeholder="e.g., Kitchen kickplate")
+            
+            submitted = st.form_submit_button("Add Item", use_container_width=True)
+            if submitted:
+                code = f"KP{width}{height}{material}"
+                if not description:
+                    description = f"{width}×{height}mm {material}"
+                
+                st.session_state.manual_items.append({
+                    'code': code,
+                    'width': width,
+                    'height': height,
+                    'material': material,
+                    'description': description,
+                    'qty': qty
+                })
+                st.success(f"Added {code} ({width}×{height}mm) × {qty}")
+                st.rerun()
         
         if st.session_state.manual_items:
-            st.write("Current items:")
-            items_df = pd.DataFrame(st.session_state.manual_items)
-            st.dataframe(items_df)
+            st.write("### Current items:")
+            display_items = []
+            for item in st.session_state.manual_items:
+                display_items.append({
+                    'Part Code': item['code'],
+                    'Width (mm)': item['width'],
+                    'Height (mm)': item['height'],
+                    'Material': item['material'],
+                    'Description': item['description'],
+                    'Quantity': item['qty']
+                })
+            items_df = pd.DataFrame(display_items)
+            st.dataframe(items_df, use_container_width=True)
             
             col1, col2 = st.columns(2)
             with col1:
@@ -421,7 +439,7 @@ def main():
                     nester = KickplateNester(stock_width, stock_height, kerf_width, grain_direction)
                     pieces = [Piece(
                         code=item['code'],
-                        description=f"{item['width']}×{item['height']}mm {item['material']}",
+                        description=item['description'],
                         width=item['width'],
                         height=item['height'],
                         material=item['material'],
