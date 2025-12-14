@@ -12,6 +12,9 @@ from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import mm
 from reportlab.lib.enums import TA_CENTER, TA_LEFT
 from datetime import datetime
+import matplotlib.pyplot as plt
+import matplotlib.patches as patches
+from matplotlib.backends.backend_agg import FigureCanvasAgg
 
 @dataclass
 class Piece:
@@ -241,6 +244,74 @@ def create_sheet_visualization(sheet: Sheet, stock_width: int, stock_height: int
     
     return fig
 
+def create_matplotlib_diagram(sheet: Sheet, stock_width: int, stock_height: int, 
+                             grain_direction: str) -> io.BytesIO:
+    """Create a matplotlib diagram for PDF export"""
+    fig, ax = plt.subplots(figsize=(12, 8))
+    
+    # Set up the plot
+    ax.set_xlim(0, stock_width)
+    ax.set_ylim(0, stock_height)
+    ax.set_aspect('equal')
+    
+    # Add grid lines every 100mm
+    for i in range(0, stock_width + 1, 100):
+        ax.axvline(i, color='lightgray', linewidth=0.5, linestyle='--', alpha=0.5)
+    for i in range(0, stock_height + 1, 100):
+        ax.axhline(i, color='lightgray', linewidth=0.5, linestyle='--', alpha=0.5)
+    
+    # Draw sheet boundary
+    boundary = patches.Rectangle((0, 0), stock_width, stock_height, 
+                                linewidth=3, edgecolor='black', 
+                                facecolor='white', fill=True)
+    ax.add_patch(boundary)
+    
+    # Color palette
+    color_palette = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899']
+    
+    # Draw each piece
+    for i, p in enumerate(sheet.placements):
+        color = color_palette[i % len(color_palette)]
+        
+        # Draw rectangle
+        rect = patches.Rectangle((p.x, p.y), p.width, p.height,
+                                linewidth=2, edgecolor='darkblue',
+                                facecolor=color, alpha=0.7)
+        ax.add_patch(rect)
+        
+        # Add text label
+        text_x = p.x + p.width / 2
+        text_y = p.y + p.height / 2
+        
+        label = f"{p.code}\n{p.width}×{p.height}"
+        if p.rotated:
+            label += " ↻"
+        
+        ax.text(text_x, text_y, label,
+               ha='center', va='center',
+               fontsize=8, fontweight='bold',
+               color='white',
+               bbox=dict(boxstyle='round,pad=0.3', facecolor=color, alpha=0.9))
+    
+    # Labels and title
+    efficiency = 100 - (sheet.waste_area / (stock_width * stock_height) * 100)
+    ax.set_xlabel('Width (mm)', fontsize=10)
+    ax.set_ylabel('Height (mm)', fontsize=10)
+    ax.set_title(f'Sheet {sheet.id + 1} - Efficiency: {efficiency:.1f}%', 
+                fontsize=12, fontweight='bold')
+    
+    # Grid
+    ax.grid(True, alpha=0.3)
+    
+    # Save to buffer
+    buf = io.BytesIO()
+    plt.tight_layout()
+    plt.savefig(buf, format='png', dpi=150, bbox_inches='tight')
+    plt.close(fig)
+    buf.seek(0)
+    
+    return buf
+
 def generate_pdf_cutlist(sheets: List[Sheet], stock_width: int, stock_height: int, 
                         grain_direction: str, filename: str = "cut_list.pdf") -> bytes:
     """Generate a PDF cut list with diagrams and tables"""
@@ -319,15 +390,11 @@ def generate_pdf_cutlist(sheets: List[Sheet], stock_width: int, stock_height: in
         elements.append(sheet_title)
         elements.append(Spacer(1, 10))
         
-        # Create visual diagram using Plotly and convert to image
-        fig = create_sheet_visualization(sheet, stock_width, stock_height, grain_direction)
-        
-        # Convert plotly figure to image
-        img_bytes = fig.to_image(format="png", width=800, height=500)
-        img_buffer = io.BytesIO(img_bytes)
+        # Create visual diagram using matplotlib
+        img_buffer = create_matplotlib_diagram(sheet, stock_width, stock_height, grain_direction)
         
         # Add image to PDF
-        img = Image(img_buffer, width=240*mm, height=150*mm)
+        img = Image(img_buffer, width=240*mm, height=160*mm)
         elements.append(img)
         elements.append(Spacer(1, 15))
         
