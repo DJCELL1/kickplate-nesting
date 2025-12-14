@@ -311,13 +311,25 @@ def generate_pdf_cutlist(sheets: List[Sheet], stock_width: int, stock_height: in
     elements.append(summary_table)
     elements.append(PageBreak())
     
-    # Add each sheet
+    # Add each sheet with visual diagram
     for sheet in sheets:
         # Sheet header
         sheet_title = Paragraph(f"<b>Sheet {sheet.id + 1}</b> - {len(sheet.placements)} pieces", 
                                styles['Heading2'])
         elements.append(sheet_title)
         elements.append(Spacer(1, 10))
+        
+        # Create visual diagram using Plotly and convert to image
+        fig = create_sheet_visualization(sheet, stock_width, stock_height, grain_direction)
+        
+        # Convert plotly figure to image
+        img_bytes = fig.to_image(format="png", width=800, height=500)
+        img_buffer = io.BytesIO(img_bytes)
+        
+        # Add image to PDF
+        img = Image(img_buffer, width=240*mm, height=150*mm)
+        elements.append(img)
+        elements.append(Spacer(1, 15))
         
         # Cutting instructions table
         table_data = [['#', 'Part Code', 'Description', 'X (mm)', 'Y (mm)', 'Width', 'Height', 'Rotated']]
