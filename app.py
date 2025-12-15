@@ -313,7 +313,8 @@ def create_matplotlib_diagram(sheet: Sheet, stock_width: int, stock_height: int,
     return buf
 
 def generate_pdf_cutlist(sheets: List[Sheet], stock_width: int, stock_height: int, 
-                        grain_direction: str, filename: str = "cut_list.pdf") -> bytes:
+                        grain_direction: str, reference_number: str = None, 
+                        filename: str = "cut_list.pdf") -> bytes:
     """Generate a PDF cut list with diagrams and tables"""
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=landscape(A4), 
@@ -329,12 +330,15 @@ def generate_pdf_cutlist(sheets: List[Sheet], stock_width: int, stock_height: in
         parent=styles['Heading1'],
         fontSize=24,
         textColor=colors.HexColor('#1e40af'),
-        spaceAfter=30,
+        spaceAfter=15,
         alignment=TA_CENTER
     )
     
     # Add title
-    title = Paragraph("Kickplate Cutting List", title_style)
+    title_text = "Kickplate Cutting List"
+    if reference_number:
+        title_text += f" - {reference_number}"
+    title = Paragraph(title_text, title_style)
     elements.append(title)
     
     # Add generation info
@@ -384,52 +388,58 @@ def generate_pdf_cutlist(sheets: List[Sheet], stock_width: int, stock_height: in
     
     # Add each sheet with visual diagram
     for sheet in sheets:
-        # Sheet header
-        sheet_title = Paragraph(f"<b>Sheet {sheet.id + 1}</b> - {len(sheet.placements)} pieces", 
-                               styles['Heading2'])
+        # Sheet header with reference number
+        header_text = f"<b>Sheet {sheet.id + 1}</b> - {len(sheet.placements)} pieces"
+        if reference_number:
+            header_text += f" | Ref: {reference_number}"
+        sheet_title = Paragraph(header_text, styles['Heading2'])
         elements.append(sheet_title)
         elements.append(Spacer(1, 10))
         
-        # Create visual diagram using matplotlib
-        img_buffer = create_matplotlib_diagram(sheet, stock_width, stock_height, grain_direction)
+        # Count unique pieces by dimensions only
+        piece_counts = {}
+        for p in sheet.placements:
+            key = f"{p.width}×{p.height}mm"
+            piece_counts[key] = piece_counts.get(key, 0) + 1
         
-        # Add image to PDF
-        img = Image(img_buffer, width=240*mm, height=160*mm)
-        elements.append(img)
-        elements.append(Spacer(1, 15))
+        # Create checklist table with checkboxes (just dimensions)
+        cutting_list_data = [['☐', 'Size', 'Qty']]
+        for size, qty in sorted(piece_counts.items()):
+            cutting_list_data.append(['☐', size, str(qty)])
         
-        # Cutting instructions table
-        table_data = [['#', 'Part Code', 'Description', 'X (mm)', 'Y (mm)', 'Width', 'Height', 'Rotated']]
-        
-        for i, p in enumerate(sheet.placements):
-            table_data.append([
-                str(i + 1),
-                p.code,
-                p.description[:30],  # Truncate long descriptions
-                str(p.x),
-                str(p.y),
-                str(p.width),
-                str(p.height),
-                '↻' if p.rotated else '-'
-            ])
-        
-        col_widths = [15*mm, 30*mm, 50*mm, 20*mm, 20*mm, 20*mm, 20*mm, 20*mm]
-        detail_table = Table(table_data, colWidths=col_widths)
-        detail_table.setStyle(TableStyle([
+        cutting_list_table = Table(cutting_list_data, colWidths=[8*mm, 30*mm, 12*mm])
+        cutting_list_table.setStyle(TableStyle([
             ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#10b981')),
             ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
-            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('ALIGN', (0, 0), (0, -1), 'CENTER'),  # Checkbox column centered
+            ('ALIGN', (1, 0), (1, -1), 'CENTER'),   # Size column centered
+            ('ALIGN', (2, 0), (2, -1), 'CENTER'),   # Qty column centered
             ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-            ('FONTSIZE', (0, 0), (-1, 0), 10),
-            ('BOTTOMPADDING', (0, 0), (-1, 0), 10),
+            ('FONTSIZE', (0, 0), (-1, 0), 11),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 8),
             ('BACKGROUND', (0, 1), (-1, -1), colors.lightgrey),
             ('GRID', (0, 0), (-1, -1), 1, colors.black),
             ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
-            ('FONTSIZE', (0, 1), (-1, -1), 8),
+            ('FONTSIZE', (0, 1), (-1, -1), 10),
             ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.lightgrey]),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('LEFTPADDING', (0, 0), (-1, -1), 3),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 3),
         ]))
         
-        elements.append(detail_table)
+        # Create visual diagram using matplotlib (larger now with more space)
+        img_buffer = create_matplotlib_diagram(sheet, stock_width, stock_height, grain_direction)
+        diagram_img = Image(img_buffer, width=210*mm, height=140*mm)
+        
+        # Combine diagram and checklist side by side
+        layout_table = Table([[diagram_img, cutting_list_table]], colWidths=[210*mm, 50*mm])
+        layout_table.setStyle(TableStyle([
+            ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+            ('ALIGN', (0, 0), (0, 0), 'LEFT'),
+            ('ALIGN', (1, 0), (1, 0), 'LEFT'),
+        ]))
+        
+        elements.append(layout_table)
         
         # Add page break between sheets (except last one)
         if sheet.id < len(sheets) - 1:
@@ -454,10 +464,11 @@ def main():
         
         stock_width = st.number_input("Stock Width (mm)", value=2400, min_value=100, step=10)
         stock_height = st.number_input("Stock Height (mm)", value=1200, min_value=100, step=10)
-        kerf_width = st.number_input("Kerf Width (mm)", value=3, min_value=0, step=1)
+        kerf_width = st.number_input("Kerf Width (mm)", value=0, min_value=0, step=1)
         grain_direction = st.selectbox(
             "Grain Direction",
             options=['horizontal', 'vertical', 'none'],
+            index=0,  # Default to horizontal
             format_func=lambda x: {
                 'horizontal': 'Horizontal (no rotation)',
                 'vertical': 'Vertical (no rotation)',
@@ -474,7 +485,13 @@ def main():
         
         if uploaded_file:
             df = pd.read_csv(uploaded_file)
+            
+            # Extract reference number from filename
+            # Format: Q30683B.S6_ShipmentProductWithCostsAndPrice.csv -> Q30683B.S6
+            reference_number = uploaded_file.name.replace('_ShipmentProductWithCostsAndPrice.csv', '').replace('.csv', '')
+            
             st.success(f"Loaded {len(df)} rows from {uploaded_file.name}")
+            st.info(f"📋 Reference: **{reference_number}**")
             
             # Filter kickplate items
             kickplate_df = df[df['PartCode'].str.startswith('KP', na=False)].copy()
@@ -581,11 +598,12 @@ def main():
                             use_container_width=True
                         )
                     with col2:
-                        pdf_data = generate_pdf_cutlist(sheets, stock_width, stock_height, grain_direction)
+                        pdf_data = generate_pdf_cutlist(sheets, stock_width, stock_height, grain_direction, 
+                                                       reference_number=reference_number)
                         st.download_button(
                             label="📄 Download PDF",
                             data=pdf_data,
-                            file_name="cut_list.pdf",
+                            file_name=f"{reference_number}_cut_list.pdf",
                             mime="application/pdf",
                             use_container_width=True
                         )
@@ -735,7 +753,8 @@ def main():
                     use_container_width=True
                 )
             with col2:
-                pdf_data = generate_pdf_cutlist(sheets, stock_width, stock_height, grain_direction)
+                pdf_data = generate_pdf_cutlist(sheets, stock_width, stock_height, grain_direction,
+                                               reference_number=None)
                 st.download_button(
                     label="📄 Download PDF",
                     data=pdf_data,
