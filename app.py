@@ -256,7 +256,7 @@ class DoorLabelParser:
     
     def __init__(self):
         self.kickplate_pattern = r'KP(\d{3,4})(\d{3})([A-Z]+)'
-        self.project_pattern = r'Q(\d+[A-Z]?):\s+(.+)'
+        self.project_pattern = r'([Qq]\d+[A-Za-z]*)\s*:\s*(.+?)(?:\n|$)'
     
     def auto_parse(self, file, file_type: str = None, project_info: Dict = None) -> List[DoorLabel]:
         """Auto-detect format and parse"""
@@ -294,12 +294,22 @@ class DoorLabelParser:
             else:
                 return 'unknown'
     
-    def parse_pdf_fixed(self, pdf_file, project_info: Dict = None) -> List[DoorLabel]:
-        """Parse Hardware Direct PDF - SKIPS doors without kickplate dimensions"""
+    
+        def parse_pdf_fixed(self, pdf_file, project_info: Dict = None) -> List[DoorLabel]:
+            """Parse Hardware Direct PDF - SKIPS doors without kickplate dimensions"""
         labels = []
         
+        # Save original position for later reading
+        original_position = pdf_file.tell() if hasattr(pdf_file, 'tell') else None
+        
+        # If no project info provided, extract it from PDF
         if project_info is None:
             project_info = self._extract_project_info_from_pdf(pdf_file)
+            print(f"DEBUG: Auto-extracted project info: {project_info['project_code']}")
+        
+        # Reset file position if we moved it
+        if original_position is not None:
+            pdf_file.seek(original_position)
         
         # Read all text from PDF
         with pdfplumber.open(pdf_file) as pdf:
@@ -313,6 +323,7 @@ class DoorLabelParser:
         
         print("=" * 80)
         print("DEBUG: START OF PDF PARSING")
+        print(f"DEBUG: Project: {project_info['project_code']} - {project_info['project_name']}")
         print("=" * 80)
         
         # Split into lines
@@ -508,6 +519,86 @@ class DoorLabelParser:
         
         return {'door': door, 'area': area}
     
+    def _extract_project_info_from_pdf(self, pdf_file) -> Dict:
+        """Extract project info from PDF - ENHANCED VERSION"""
+        try:
+            with pdfplumber.open(pdf_file) as pdf:
+                first_page = pdf.pages[0]
+                text = first_page.extract_text()
+                
+                print(f"DEBUG: Extracting project info from text:\n{text[:500]}")
+                
+                # Pattern 1: "Q30683B: Matamata Indoor Sports Facility"
+                match = re.search(r'([Qq]\d+[A-Za-z]*)\s*:\s*(.+?)(?:\n|$)', text)
+                if match:
+                    project_code = match.group(1).strip()
+                    project_name = match.group(2).strip()
+                    print(f"DEBUG: Found project: {project_code} - {project_name}")
+                    return {
+                        'project_code': project_code,
+                        'project_name': project_name
+                    }
+                
+                # Pattern 2: Look for project number in various formats
+                project_patterns = [
+                    r'Project\s*[#:]?\s*([Qq]?\d+[A-Za-z]*)',  # Project: Q30683B
+                    r'Job\s*[#:]?\s*([Qq]?\d+[A-Za-z]*)',      # Job: Q30683B
+                    r'Ref\s*[#:]?\s*([Qq]?\d+[A-Za-z]*)',      # Ref: Q30683B
+                    r'([Qq]\d+[A-Za-z]*)\s+[-:]',              # Q30683B -
+                    r'\b([Qq]\d+[A-Za-z]*)\b',                 # Just Q30683B
+                ]
+                
+                for pattern in project_patterns:
+                    match = re.search(pattern, text)
+                    if match:
+                        project_code = match.group(1).strip()
+                        print(f"DEBUG: Found project code: {project_code}")
+                        
+                        # Try to find project name (text after code)
+                        name_match = re.search(f'{re.escape(project_code)}[\\s:]+(.+?)(?:\\n|$)', text)
+                        if name_match:
+                            project_name = name_match.group(1).strip()
+                        else:
+                            project_name = f"Project {project_code}"
+                        
+                        return {
+                            'project_code': project_code,
+                            'project_name': project_name
+                        }
+                
+                # Pattern 3: Look for any Q-number in the first few lines
+                lines = text.split('\n')
+                for line in lines[:10]:  # Check first 10 lines
+                    match = re.search(r'([Qq]\d+[A-Za-z]*)', line)
+                    if match:
+                        project_code = match.group(1).strip()
+                        print(f"DEBUG: Found project in line: {line}")
+                        
+                        # Extract name from same line after code
+                        parts = line.split(project_code)
+                        if len(parts) > 1 and parts[1].strip():
+                            project_name = parts[1].split('\n')[0].strip(': -')
+                        else:
+                            project_name = f"Project {project_code}"
+                        
+                        return {
+                            'project_code': project_code,
+                            'project_name': project_name
+                        }
+                
+                print("DEBUG: No project info found, using defaults")
+                return {
+                    'project_code': 'UNKNOWN',
+                    'project_name': 'Unknown Project'
+                }
+                
+        except Exception as e:
+            print(f"ERROR extracting project info: {e}")
+            return {
+                'project_code': 'UNKNOWN',
+                'project_name': 'Unknown Project'
+            }
+    
     def parse_csv(self, csv_file, project_info: Dict = None) -> List[DoorLabel]:
         """Parse order CSV files"""
         df = pd.read_csv(csv_file)
@@ -609,33 +700,6 @@ class DoorLabelParser:
                     ))
         
         return labels
-    
-    def _extract_project_info_from_pdf(self, pdf_file) -> Dict:
-        """Extract project info from PDF"""
-        with pdfplumber.open(pdf_file) as pdf:
-            first_page = pdf.pages[0]
-            text = first_page.extract_text()
-            
-            match = re.search(self.project_pattern, text)
-            if match:
-                return {
-                    'project_code': match.group(1),
-                    'project_name': match.group(2).strip()
-                }
-            
-            # Look for other patterns
-            lines = text.split('\n')
-            for line in lines:
-                if 'Project:' in line:
-                    return {
-                        'project_code': line.replace('Project:', '').strip(),
-                        'project_name': line.replace('Project:', '').strip()
-                    }
-        
-        return {
-            'project_code': 'UNKNOWN',
-            'project_name': 'Unknown Project'
-        }
     
     def _deduplicate_labels(self, labels: List[DoorLabel]) -> List[DoorLabel]:
         """Remove duplicate labels"""
@@ -1003,6 +1067,8 @@ def main():
         st.session_state.label_pieces = None
     if 'label_sheets' not in st.session_state:
         st.session_state.label_sheets = None
+    if 'parsed_project_info' not in st.session_state:
+        st.session_state.parsed_project_info = None
     
     # Sidebar configuration
     with st.sidebar:
@@ -1334,19 +1400,45 @@ def main():
         
         with upload_col2:
             st.write("### Project Info")
-            use_sidebar_info = st.checkbox("Use sidebar project info", value=True)
             
-            if not use_sidebar_info:
-                project_code_input = st.text_input("Project Code", key="label_project_code")
-                project_name_input = st.text_input("Project Name", key="label_project_name")
-                project_info = {
-                    'project_code': project_code_input,
-                    'project_name': project_name_input
-                }
+            # Auto-detect from PDF
+            if uploaded_file and file_type == "Finishing Sheet (PDF)":
+                if st.button("🔍 Auto-detect Project Info", key="auto_detect"):
+                    with st.spinner("Extracting project info..."):
+                        try:
+                            # Extract project info from PDF
+                            project_info = parser._extract_project_info_from_pdf(uploaded_file)
+                            st.session_state.parsed_project_info = project_info
+                            
+                            # Also update main project info
+                            st.session_state.project_info = project_info
+                            st.success(f"✅ Detected: {project_info['project_code']} - {project_info['project_name']}")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Could not auto-detect project info: {e}")
+            
+            # Show current project info (auto-detected or manual)
+            if st.session_state.parsed_project_info:
+                # Use auto-detected info
+                project_info = st.session_state.parsed_project_info
+                st.info(f"**Auto-detected:**\n"
+                       f"Code: `{project_info['project_code']}`\n"
+                       f"Name: `{project_info['project_name']}`")
             else:
-                project_info = st.session_state.project_info
+                # Allow manual override
+                use_sidebar_info = st.checkbox("Use sidebar project info", value=True)
+                
+                if not use_sidebar_info:
+                    project_code_input = st.text_input("Project Code", key="label_project_code")
+                    project_name_input = st.text_input("Project Name", key="label_project_name")
+                    project_info = {
+                        'project_code': project_code_input,
+                        'project_name': project_name_input
+                    }
+                else:
+                    project_info = st.session_state.project_info
         
-        # Parse button
+        # Parse button - UPDATED TO AUTO-FILL PROJECT INFO
         if file_type != "Manual Entry" and uploaded_file:
             col1, col2 = st.columns(2)
             with col1:
@@ -1354,6 +1446,13 @@ def main():
                     with st.spinner("Parsing file..."):
                         try:
                             if file_type == "Finishing Sheet (PDF)":
+                                # First extract project info if not already done
+                                if st.session_state.parsed_project_info is None:
+                                    extracted_info = parser._extract_project_info_from_pdf(uploaded_file)
+                                    st.session_state.parsed_project_info = extracted_info
+                                    project_info = extracted_info
+                                    st.success(f"📋 Auto-detected project: {extracted_info['project_code']}")
+                                
                                 labels = parser.parse_pdf_fixed(uploaded_file, project_info)
                             elif file_type == "Order CSV":
                                 labels = parser.parse_csv(uploaded_file, project_info)
@@ -1378,13 +1477,6 @@ def main():
                                 sample_df = pd.DataFrame(sample_data)
                                 st.dataframe(sample_df)
                                 
-                                # Also show in terminal/console for debugging
-                                print(f"\n{'='*60}")
-                                print(f"PARSED {len(labels)} LABELS")
-                                print(f"{'='*60}")
-                                for i, label in enumerate(labels[:5]):
-                                    print(f"{i+1}. Door: {label.door_number}, Area: {label.area}, Size: {label.width}×{label.height}mm")
-                                
                         except Exception as e:
                             st.error(f"Error parsing file: {str(e)}")
             
@@ -1397,6 +1489,12 @@ def main():
                             
                             st.write("### First 1000 chars of PDF:")
                             st.text(text[:1000])
+                            
+                            # Also show project info extraction attempt
+                            project_info = parser._extract_project_info_from_pdf(uploaded_file)
+                            st.write(f"### Auto-detected Project Info:")
+                            st.write(f"Code: `{project_info['project_code']}`")
+                            st.write(f"Name: `{project_info['project_name']}`")
         
         # Manual entry for labels
         elif file_type == "Manual Entry":
@@ -1451,6 +1549,7 @@ def main():
                     st.session_state.door_labels = []
                     st.session_state.label_pieces = None
                     st.session_state.label_sheets = None
+                    st.session_state.parsed_project_info = None
                     st.rerun()
             
             # Display labels in an editable dataframe
@@ -1712,6 +1811,7 @@ def main():
         if st.button("Show Session State", key="show_session"):
             st.write("**door_labels:**", len(st.session_state.get('door_labels', [])))
             st.write("**project_info:**", st.session_state.get('project_info', {}))
+            st.write("**parsed_project_info:**", st.session_state.get('parsed_project_info', {}))
             st.write("**manual_items:**", len(st.session_state.get('manual_items', [])))
             st.write("**label_pieces:**", st.session_state.get('label_pieces', None) is not None)
             st.write("**label_sheets:**", st.session_state.get('label_sheets', None) is not None)
