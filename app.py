@@ -295,8 +295,8 @@ class DoorLabelParser:
                 return 'unknown'
     
     
-        def parse_pdf_fixed(self, pdf_file, project_info: Dict = None) -> List[DoorLabel]:
-            """Parse Hardware Direct PDF - SKIPS doors without kickplate dimensions"""
+    def parse_pdf_fixed(self, pdf_file, project_info: Dict = None) -> List[DoorLabel]:
+        """Parse Hardware Direct PDF - SKIPS doors without kickplate dimensions"""
         labels = []
         
         # Save original position for later reading
@@ -949,7 +949,7 @@ def generate_pdf_cutlist(sheets: List[Sheet], stock_width: int, stock_height: in
     buffer.seek(0)
     return buffer.getvalue()
 
-def generate_label_pdf(labels: List[DoorLabel], label_size: tuple = (90, 57), 
+def generate_label_pdf(labels: List[DoorLabel], label_size: tuple = (90, 90), 
                       labels_per_page: tuple = (3, 8), include_project: bool = True,
                       page_size: tuple = letter) -> bytes:
     """
