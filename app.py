@@ -1090,8 +1090,8 @@ def main():
         
         st.divider()
         st.header("🏷️ Label Settings")
-        label_width = st.number_input("Label Width (mm)", value=90, min_value=50, max_value=200)
-        label_height = st.number_input("Label Height (mm)", value=57, min_value=30, max_value=150)
+        label_width = st.number_input("Label Width (mm)", value=60, min_value=50, max_value=200)
+        label_height = st.number_input("Label Height (mm)", value=70, min_value=30, max_value=150)
         include_project = st.checkbox("Include Project Code on Labels", value=True)
         
         st.divider()
