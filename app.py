@@ -1054,7 +1054,12 @@ def main():
     # Header with logo
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
-        st.image("Logos-01.jpg", use_container_width=True)
+        import os
+        logo_path = "Logos-01.jpg"
+        if os.path.exists(logo_path):
+            st.image(logo_path, use_container_width=True)
+        else:
+            st.markdown("<h1 style='text-align: center; color: #F47920;'>HDL</h1>", unsafe_allow_html=True)
 
     st.markdown("<h2 style='text-align: center; color: #2B2B2B;'>Kickplate Nesting Optimizer</h2>", unsafe_allow_html=True)
     st.markdown("<p style='text-align: center; color: #666;'>Optimize cutting layouts and generate door labels for kickplates</p>", unsafe_allow_html=True)
