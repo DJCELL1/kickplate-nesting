@@ -9,6 +9,9 @@ import pdfplumber
 import openpyxl
 from datetime import datetime
 
+# Hardware Direct Theme
+from hd_theme import apply_hd_theme, add_logo, metric_card, badge
+
 # PDF Generation
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4, landscape, letter
@@ -1049,19 +1052,29 @@ def generate_label_pdf(labels: List[DoorLabel], label_size: tuple = (90, 90),
 
 # ========== STREAMLIT APP ==========
 def main():
-    st.set_page_config(page_title="Kickplate Nesting Optimizer", layout="wide")
+    st.set_page_config(
+        page_title="Kickplate Nesting Optimizer | Hardware Direct",
+        layout="wide",
+        page_icon="🔶"
+    )
 
-    # Header with logo
+    # Apply Hardware Direct theme
+    apply_hd_theme()
+
+    # Add logo to sidebar
     try:
-        col1, col2, col3 = st.columns([1, 2, 1])
-        with col2:
-            st.image("Logos-01.jpg", use_container_width=True)
-    except:
-        # If logo fails to load, just skip it
-        pass
+        add_logo(logo_path="Logos-01.jpg", text="Hardware Direct", subtitle="Kickplate Nesting Optimizer")
+    except Exception as e:
+        # Fallback to text-based logo if image fails
+        add_logo(text="Hardware Direct", subtitle="Kickplate Nesting Optimizer")
 
-    st.markdown("<h2 style='text-align: center; color: #2B2B2B;'>Kickplate Nesting Optimizer</h2>", unsafe_allow_html=True)
-    st.markdown("<p style='text-align: center; color: #666;'>Optimize cutting layouts and generate door labels for kickplates</p>", unsafe_allow_html=True)
+    # Main header
+    st.markdown("""
+    <div style='text-align: center; padding: 1rem 0 2rem 0;'>
+        <h1 style='color: #2B2B2B; margin-bottom: 0.5rem;'>Kickplate Nesting Optimizer</h1>
+        <p style='color: #666; font-size: 1.1rem;'>Optimize cutting layouts and generate door labels for kickplates</p>
+    </div>
+    """, unsafe_allow_html=True)
     
     # Initialize session state
     if 'manual_items' not in st.session_state:
@@ -1081,7 +1094,7 @@ def main():
     
     # Sidebar configuration
     with st.sidebar:
-        st.header("⚙️ Configuration")
+        st.markdown("<h2 style='color: white; margin-top: 1rem;'>⚙️ Configuration</h2>", unsafe_allow_html=True)
         
         stock_width = st.number_input("Stock Width (mm)", value=2400, min_value=100, step=10)
         stock_height = st.number_input("Stock Height (mm)", value=1200, min_value=100, step=10)
@@ -1098,13 +1111,13 @@ def main():
         )
         
         st.divider()
-        st.header("🏷️ Label Settings")
+        st.markdown("<h2 style='color: white;'>🏷️ Label Settings</h2>", unsafe_allow_html=True)
         label_width = st.number_input("Label Width (mm)", value=60, min_value=50, max_value=200)
         label_height = st.number_input("Label Height (mm)", value=70, min_value=30, max_value=150)
         include_project = st.checkbox("Include Project Code on Labels", value=True)
         
         st.divider()
-        st.header("📋 Project Info")
+        st.markdown("<h2 style='color: white;'>📋 Project Info</h2>", unsafe_allow_html=True)
         project_code = st.text_input("Project Code", value=st.session_state.project_info['project_code'])
         project_name = st.text_input("Project Name", value=st.session_state.project_info['project_name'])
         
@@ -1138,16 +1151,16 @@ def main():
                 
                 col1, col2, col3, col4 = st.columns(4)
                 with col1:
-                    st.metric("Unique Items", len(kickplate_df))
+                    metric_card("Unique Items", str(len(kickplate_df)), "Different kickplate types")
                 with col2:
                     total_qty = kickplate_df['ProductQuantity'].sum()
-                    st.metric("Total Pieces", int(total_qty))
+                    metric_card("Total Pieces", str(int(total_qty)), "To be nested")
                 with col3:
                     total_cost = (kickplate_df['ProductCost'] * kickplate_df['ProductQuantity']).sum()
-                    st.metric("Total Cost", f"${total_cost:.2f}")
+                    metric_card("Total Cost", f"${total_cost:.2f}", "Material cost")
                 with col4:
                     total_price = (kickplate_df['ProductPrice'] * kickplate_df['ProductQuantity']).sum()
-                    st.metric("Total Revenue", f"${total_price:.2f}")
+                    metric_card("Total Revenue", f"${total_price:.2f}", "Project value")
                 
                 if st.button("🚀 Generate Cut List", type="primary", use_container_width=True, key="csv_generate"):
                     nester = KickplateNester(stock_width, stock_height, kerf_width, grain_direction)
@@ -1169,16 +1182,16 @@ def main():
                         sheets = nester.nest_pieces(pieces)
                     
                     st.success(f"✅ Generated cut list with {len(sheets)} sheet(s)")
-                    
+
                     col1, col2, col3 = st.columns(3)
                     with col1:
-                        st.metric("Sheets Required", len(sheets))
+                        metric_card("Sheets Required", str(len(sheets)), "Full stock sheets")
                     with col2:
                         total_pieces = sum(len(s.placements) for s in sheets)
-                        st.metric("Total Pieces", total_pieces)
+                        metric_card("Total Pieces", str(total_pieces), "Pieces to cut")
                     with col3:
                         avg_efficiency = sum(100 - (s.waste_area / (stock_width * stock_height) * 100) for s in sheets) / len(sheets)
-                        st.metric("Avg Efficiency", f"{avg_efficiency:.1f}%")
+                        metric_card("Avg Efficiency", f"{avg_efficiency:.1f}%", "Material utilization")
                     
                     for sheet in sheets:
                         with st.expander(f"📋 Sheet {sheet.id + 1} - {len(sheet.placements)} pieces", expanded=True):
@@ -1316,16 +1329,16 @@ def main():
         if st.session_state.manual_sheets:
             sheets = st.session_state.manual_sheets
             st.success(f"✅ Generated cut list with {len(sheets)} sheet(s)")
-            
+
             col1, col2, col3 = st.columns(3)
             with col1:
-                st.metric("Sheets Required", len(sheets))
+                metric_card("Sheets Required", str(len(sheets)), "Full stock sheets")
             with col2:
                 total_pieces = sum(len(s.placements) for s in sheets)
-                st.metric("Total Pieces", total_pieces)
+                metric_card("Total Pieces", str(total_pieces), "Pieces to cut")
             with col3:
                 avg_efficiency = sum(100 - (s.waste_area / (stock_width * stock_height) * 100) for s in sheets) / len(sheets)
-                st.metric("Avg Efficiency", f"{avg_efficiency:.1f}%")
+                metric_card("Avg Efficiency", f"{avg_efficiency:.1f}%", "Material utilization")
             
             for sheet in sheets:
                 with st.expander(f"📋 Sheet {sheet.id + 1} - {len(sheet.placements)} pieces", expanded=True):
@@ -1660,12 +1673,12 @@ def main():
                     
                     col1, col2, col3 = st.columns(3)
                     with col1:
-                        st.metric("Unique Sizes", len(pieces))
+                        metric_card("Unique Sizes", str(len(pieces)), "Different kickplate sizes")
                     with col2:
-                        st.metric("Total Pieces", total_pieces)
+                        metric_card("Total Pieces", str(total_pieces), "Kickplates to cut")
                     with col3:
                         total_area = sum(p.width * p.height * p.qty for p in pieces) / 1000000  # m²
-                        st.metric("Total Area", f"{total_area:.2f} m²")
+                        metric_card("Total Area", f"{total_area:.2f} m²", "Material required")
             
             # Show cut list results if generated
             if st.session_state.label_sheets:
@@ -1673,16 +1686,16 @@ def main():
                 pieces = st.session_state.label_pieces
                 
                 st.write("### 📋 Cut List Results")
-                
+
                 col1, col2, col3 = st.columns(3)
                 with col1:
-                    st.metric("Sheets Required", len(sheets))
+                    metric_card("Sheets Required", str(len(sheets)), "Full stock sheets")
                 with col2:
                     total_pieces = sum(len(s.placements) for s in sheets)
-                    st.metric("Total Pieces", total_pieces)
+                    metric_card("Total Pieces", str(total_pieces), "Pieces to cut")
                 with col3:
                     avg_efficiency = sum(100 - (s.waste_area / (stock_width * stock_height) * 100) for s in sheets) / len(sheets)
-                    st.metric("Avg Efficiency", f"{avg_efficiency:.1f}%")
+                    metric_card("Avg Efficiency", f"{avg_efficiency:.1f}%", "Material utilization")
                 
                 # Visualize first sheet
                 if sheets:
